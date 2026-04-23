@@ -1,0 +1,444 @@
+---
+title: "PMTCT Retention"
+author: "Mitch"
+date: "2024-04-30"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+library
+
+```{r cars}
+summary(cars)
+```
+
+data sets
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+active
+```{r}
+patient_visit<- greencard 
+
+##clients who are active before the end of the month.
+active <- patient_visit%>%
+  select(patient_id,visit_date,next_appointment_date, mflcode,pregnancy_status,breastfeeding)%>%
+  filter(visit_date <= as.Date("2024-03-31"))%>%
+  arrange (desc(visit_date))%>%    ### arrange the data in descending order
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+  rename("last_visit_date" = "visit_date")
+
+
+##IIT those scheduled to come within 30 days of the past month
+IITkemr<- active %>%
+  filter(next_appointment_date >= as.Date("2024-03-31")-28)
+
+allpatient <- IITkemr[IITkemr$next_appointment_date >= IITkemr$last_visit_date,] ###clients who have a higher appointment date. 
+
+
+####patients who have been discontinued 
+disc <- discontinued%>%
+  select(patient_id,visit_date,program_name,discontinuation_reason,mflcode)%>%
+  filter(program_name == "HIV")%>%
+  rename("disc_visit_date" = "visit_date")%>%
+  separate(disc_visit_date,c("date_disc", "time_disc"),sep=" ") ###separate date and time
+
+
+class(disc$date_disc) ##check class of date
+
+disc$date_disc <- ymd(disc$date_disc) ##convert date in date variables
+
+class(disc$date_disc) ###confirm class of date
+
+
+adisc <- disc %>%
+  filter(date_disc <= as.Date("2024-03-31")-28)%>%
+  arrange (desc(date_disc))%>%    ### arrange the data in descending order
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+allpatient <- left_join(allpatient,adisc, by = c("patient_id","mflcode"))
+
+##clients who have never been discontinued from the program
+act <- allpatient %>%
+  filter(is.na(discontinuation_reason)) ####removing the patients discontinued
+
+##client who have ever been discontinued but are returned to care. Thus their visit date is greater than their last discontinuation date
+
+never_disc <- allpatient %>% 
+  drop_na(discontinuation_reason)
+
+
+rtt <- never_disc[never_disc$last_visit_date >= never_disc$date_disc,] ###those returned to care
+
+rtt <- rtt %>%
+  filter(discontinuation_reason != "Died")
+
+active_clients <- rbind(act,rtt) %>%
+  arrange(desc(last_visit_date))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+#####when the clients started art
+art_start <- drugevent%>%
+  select(patient_id,mflcode,program,art_startdate)%>% ###get the regimen of all clients. allow to remove clients 
+ filter(program == "HIV")%>%
+  arrange(desc(art_startdate))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+actpat <- inner_join(active_clients,art_start, by = c("patient_id","mflcode"))
+
+actpat <- actpat %>%
+  filter(art_startdate <= as.Date("2024-03-31"))
+
+pmtct <- actpat %>%
+  filter(breastfeeding == "Yes"|pregnancy_status == "Yes")
+
+```
+3 month cohort
+
+```{r}
+patient_visit<- greencard 
+
+##clients who are active before the end of the month.
+active <- patient_visit%>%
+  select(patient_id,visit_date,next_appointment_date, mflcode,pregnancy_status,breastfeeding)%>%
+  filter(visit_date <= as.Date("2024-03-31"))%>%
+  arrange (desc(visit_date))%>%    ### arrange the data in descending order
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+  rename("last_visit_date" = "visit_date")
+
+
+##IIT those scheduled to come within 30 days of the past month
+IITkemr<- active %>%
+  filter(next_appointment_date >= as.Date("2024-03-31")-28)
+
+allpatient <- IITkemr[IITkemr$next_appointment_date >= IITkemr$last_visit_date,] ###clients who have a higher appointment date. 
+
+
+####patients who have been discontinued 
+disc <- discontinued%>%
+  select(patient_id,visit_date,program_name,discontinuation_reason,mflcode)%>%
+  filter(program_name == "HIV")%>%
+  rename("disc_visit_date" = "visit_date")%>%
+  separate(disc_visit_date,c("date_disc", "time_disc"),sep=" ") ###separate date and time
+
+
+class(disc$date_disc) ##check class of date
+
+disc$date_disc <- ymd(disc$date_disc) ##convert date in date variables
+
+class(disc$date_disc) ###confirm class of date
+
+
+adisc <- disc %>%
+  filter(date_disc <= as.Date("2024-03-31")-28)%>%
+  arrange (desc(date_disc))%>%    ### arrange the data in descending order
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+allpatient <- left_join(allpatient,adisc, by = c("patient_id","mflcode"))
+
+##clients who have never been discontinued from the program
+act <- allpatient %>%
+  filter(is.na(discontinuation_reason)) ####removing the patients discontinued
+
+##client who have ever been discontinued but are returned to care. Thus their visit date is greater than their last discontinuation date
+
+never_disc <- allpatient %>% 
+  drop_na(discontinuation_reason)
+
+
+rtt <- never_disc[never_disc$last_visit_date >= never_disc$date_disc,] ###those returned to care
+
+rtt <- rtt %>%
+  filter(discontinuation_reason != "Died")
+
+active_clients <- rbind(act,rtt) %>%
+  arrange(desc(last_visit_date))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+#####when the clients started art
+art_start <- drugevent%>%
+  select(patient_id,mflcode,program,art_startdate)%>% ###get the regimen of all clients. allow to remove clients 
+ filter(program == "HIV")%>%
+  arrange(desc(art_startdate))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+actpat <- inner_join(active_clients,art_start, by = c("patient_id","mflcode"))
+
+actpat <- actpat %>%
+  filter(art_startdate <= as.Date("2024-03-31"))
+
+pmtct <- actpat %>%
+  filter(breastfeeding == "Yes"|pregnancy_status == "Yes")
+
+three_pmtct <- actpat %>%
+  filter(breastfeeding == "Yes"|pregnancy_status == "Yes")
+
+ret_three <- inner_join(pmtct,three_pmtct, by = c("patient_id","mflcode"))
+
+write_xlsx(ret_three, path = "ret_three.xlsx")
+
+```
+6 month cohort
+```{r}
+patient_visit<- greencard 
+
+##clients who are active before the end of the month.
+active <- patient_visit%>%
+  select(patient_id,visit_date,next_appointment_date, mflcode,pregnancy_status,breastfeeding)%>%
+  filter(visit_date <= as.Date("2024-03-31"))%>%
+  arrange (desc(visit_date))%>%    ### arrange the data in descending order
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+  rename("last_visit_date" = "visit_date")
+
+
+##IIT those scheduled to come within 30 days of the past month
+IITkemr<- active %>%
+  filter(next_appointment_date >= as.Date("2024-03-31")-28)
+
+allpatient <- IITkemr[IITkemr$next_appointment_date >= IITkemr$last_visit_date,] ###clients who have a higher appointment date. 
+
+
+####patients who have been discontinued 
+disc <- discontinued%>%
+  select(patient_id,visit_date,program_name,discontinuation_reason,mflcode)%>%
+  filter(program_name == "HIV")%>%
+  rename("disc_visit_date" = "visit_date")%>%
+  separate(disc_visit_date,c("date_disc", "time_disc"),sep=" ") ###separate date and time
+
+
+class(disc$date_disc) ##check class of date
+
+disc$date_disc <- ymd(disc$date_disc) ##convert date in date variables
+
+class(disc$date_disc) ###confirm class of date
+
+
+adisc <- disc %>%
+  filter(date_disc <= as.Date("2024-03-31")-28)%>%
+  arrange (desc(date_disc))%>%    ### arrange the data in descending order
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+allpatient <- left_join(allpatient,adisc, by = c("patient_id","mflcode"))
+
+##clients who have never been discontinued from the program
+act <- allpatient %>%
+  filter(is.na(discontinuation_reason)) ####removing the patients discontinued
+
+##client who have ever been discontinued but are returned to care. Thus their visit date is greater than their last discontinuation date
+
+never_disc <- allpatient %>% 
+  drop_na(discontinuation_reason)
+
+
+rtt <- never_disc[never_disc$last_visit_date >= never_disc$date_disc,] ###those returned to care
+
+rtt <- rtt %>%
+  filter(discontinuation_reason != "Died")
+
+active_clients <- rbind(act,rtt) %>%
+  arrange(desc(last_visit_date))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+#####when the clients started art
+art_start <- drugevent%>%
+  select(patient_id,mflcode,program,art_startdate)%>% ###get the regimen of all clients. allow to remove clients 
+ filter(program == "HIV")%>%
+  arrange(desc(art_startdate))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+actpat <- inner_join(active_clients,art_start, by = c("patient_id","mflcode"))
+
+six_pmtct <- actpat %>%
+  filter(breastfeeding == "Yes"|pregnancy_status == "Yes")
+
+ret_six <- inner_join(pmtct,six_pmtct, by = c("patient_id","mflcode"))
+
+write_xlsx(ret_six, path = "ret_six.xlsx")
+
+```
+12 month cohort
+```{r}
+patient_visit<- greencard 
+
+##clients who are active before the end of the month.
+active <- patient_visit%>%
+  select(patient_id,visit_date,next_appointment_date, mflcode,pregnancy_status,breastfeeding)%>%
+  filter(visit_date <= as.Date("2024-03-31"))%>%
+  arrange (desc(visit_date))%>%    ### arrange the data in descending order
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+  rename("last_visit_date" = "visit_date")
+
+
+##IIT those scheduled to come within 30 days of the past month
+IITkemr<- active %>%
+  filter(next_appointment_date >= as.Date("2024-03-31")-28)
+
+allpatient <- IITkemr[IITkemr$next_appointment_date >= IITkemr$last_visit_date,] ###clients who have a higher appointment date. 
+
+
+####patients who have been discontinued 
+disc <- discontinued%>%
+  select(patient_id,visit_date,program_name,discontinuation_reason,mflcode)%>%
+  filter(program_name == "HIV")%>%
+  rename("disc_visit_date" = "visit_date")%>%
+  separate(disc_visit_date,c("date_disc", "time_disc"),sep=" ") ###separate date and time
+
+
+class(disc$date_disc) ##check class of date
+
+disc$date_disc <- ymd(disc$date_disc) ##convert date in date variables
+
+class(disc$date_disc) ###confirm class of date
+
+
+adisc <- disc %>%
+  filter(date_disc <= as.Date("2024-03-31")-28)%>%
+  arrange (desc(date_disc))%>%    ### arrange the data in descending order
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+allpatient <- left_join(allpatient,adisc, by = c("patient_id","mflcode"))
+
+##clients who have never been discontinued from the program
+act <- allpatient %>%
+  filter(is.na(discontinuation_reason)) ####removing the patients discontinued
+
+##client who have ever been discontinued but are returned to care. Thus their visit date is greater than their last discontinuation date
+
+never_disc <- allpatient %>% 
+  drop_na(discontinuation_reason)
+
+
+rtt <- never_disc[never_disc$last_visit_date >= never_disc$date_disc,] ###those returned to care
+
+rtt <- rtt %>%
+  filter(discontinuation_reason != "Died")
+
+active_clients <- rbind(act,rtt) %>%
+  arrange(desc(last_visit_date))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+#####when the clients started art
+art_start <- drugevent%>%
+  select(patient_id,mflcode,program,art_startdate)%>% ###get the regimen of all clients. allow to remove clients 
+ filter(program == "HIV")%>%
+  arrange(desc(art_startdate))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+actpat <- inner_join(active_clients,art_start, by = c("patient_id","mflcode"))
+
+actpat <- actpat %>%
+  filter(art_startdate <= as.Date("2024-03-31"))
+
+pmtct <- actpat %>%
+  filter(breastfeeding == "Yes"|pregnancy_status == "Yes")
+
+tw_pmtct <- actpat %>%
+  filter(breastfeeding == "Yes"|pregnancy_status == "Yes")
+
+ret_tw <- inner_join(pmtct,tw_pmtct, by = c("patient_id","mflcode"))
+
+write_xlsx(ret_tw, path = "ret_tw.xlsx")
+
+```
+
+24 month cohort
+```{r}
+patient_visit<- greencard 
+
+##clients who are active before the end of the month.
+active <- patient_visit%>%
+  select(patient_id,visit_date,next_appointment_date, mflcode,pregnancy_status,breastfeeding)%>%
+  filter(visit_date <= as.Date("2024-03-31"))%>%
+  arrange (desc(visit_date))%>%    ### arrange the data in descending order
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+  rename("last_visit_date" = "visit_date")
+
+
+##IIT those scheduled to come within 30 days of the past month
+IITkemr<- active %>%
+  filter(next_appointment_date >= as.Date("2024-03-31")-28)
+
+allpatient <- IITkemr[IITkemr$next_appointment_date >= IITkemr$last_visit_date,] ###clients who have a higher appointment date. 
+
+
+####patients who have been discontinued 
+disc <- discontinued%>%
+  select(patient_id,visit_date,program_name,discontinuation_reason,mflcode)%>%
+  filter(program_name == "HIV")%>%
+  rename("disc_visit_date" = "visit_date")%>%
+  separate(disc_visit_date,c("date_disc", "time_disc"),sep=" ") ###separate date and time
+
+
+class(disc$date_disc) ##check class of date
+
+disc$date_disc <- ymd(disc$date_disc) ##convert date in date variables
+
+class(disc$date_disc) ###confirm class of date
+
+
+adisc <- disc %>%
+  filter(date_disc <= as.Date("2024-03-31")-28)%>%
+  arrange (desc(date_disc))%>%    ### arrange the data in descending order
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+allpatient <- left_join(allpatient,adisc, by = c("patient_id","mflcode"))
+
+##clients who have never been discontinued from the program
+act <- allpatient %>%
+  filter(is.na(discontinuation_reason)) ####removing the patients discontinued
+
+##client who have ever been discontinued but are returned to care. Thus their visit date is greater than their last discontinuation date
+
+never_disc <- allpatient %>% 
+  drop_na(discontinuation_reason)
+
+
+rtt <- never_disc[never_disc$last_visit_date >= never_disc$date_disc,] ###those returned to care
+
+rtt <- rtt %>%
+  filter(discontinuation_reason != "Died")
+
+active_clients <- rbind(act,rtt) %>%
+  arrange(desc(last_visit_date))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+#####when the clients started art
+art_start <- drugevent%>%
+  select(patient_id,mflcode,program,art_startdate)%>% ###get the regimen of all clients. allow to remove clients 
+ filter(program == "HIV")%>%
+  arrange(desc(art_startdate))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+actpat <- inner_join(active_clients,art_start, by = c("patient_id","mflcode"))
+
+actpat <- actpat %>%
+  filter(art_startdate <= as.Date("2024-03-31"))
+
+four_pmtct <- actpat %>%
+  filter(breastfeeding == "Yes"|pregnancy_status == "Yes")
+
+ret_four <- inner_join(pmtct,four_pmtct, by = c("patient_id","mflcode"))
+
+write_xlsx(ret_four, path = "ret_four.xlsx")
+```
+
