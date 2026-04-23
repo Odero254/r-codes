@@ -1,0 +1,657 @@
+---
+title: "hei quaterly"
+author: "Mitch"
+date: "2024-04-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+libraries
+```{r}
+pacman::p_load(tidyverse, lubridate, haven, writexl,readxl,zoo)
+```
+data sets
+```{r}
+hei <-read_sav("\\\\ng-svr-fs/Hope-Data/Coptic_Hospitals_dataset/HEI Enrollment.sav") ### clients enrolled
+
+lab <- read_sav("\\\\ng-svr-fs/Hope-Data/Coptic_Hospitals_dataset/lab data.sav") ### labworks
+
+drug <- read_sav("\\\\ng-svr-fs/Hope-Data/Coptic_Hospitals_datasetDrug_Prescriptions.sav") ###drug distribute 
+
+hiv <- read_sav("\\\\ng-svr-fs/Hope-Data/Coptic_Hospitals_dataset/HIV enrollment.sav") ## positive for HIV
+
+heifol <- read_sav("\\\\ng-svr-fs/Hope-Data/Coptic_Hospitals_dataset/HEI FollowUP.sav") ###HEI FOLOW UP FOR REQUEST FOR PCR
+
+defaulter <- read_sav("\\\\ng-svr-fs/Hope-Data/Coptic_Hospitals_dataset/Defaulter_tracing.sav") ####missed appoint
+
+drugevent <- read_sav("\\\\ng-svr-fs/Hope-Data/Coptic_Hospitals_dataset/Drug Event.sav") ###drug stat 
+
+hei_disc<- read_sav("\\\\ng-svr-fs/Hope-Data/Coptic_Hospitals_dataset/HEI_Discontinuation.sav") ####missed appoint
+
+
+relationship <-read_sav("\\\\ng-svr-fs/Hope-Data/Coptic_Hospitals_dataset/Relationship_Type.sav") ###relationship with mother
+```
+
+hei 
+```{r}
+
+```
+
+EID
+```{r}
+##number of HIV HEI 
+
+monthhei <- hei %>%
+  select(hei_no,visit_date,patient_id,mflcode,DOB,openmrs_id,exit_date)%>%
+  filter(between(DOB, as.Date("2022-04-01"), as.Date("2022-05-31")))%>%
+  arrange(desc(visit_date))%>%    ### arrange the data in descending order
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+  rename("last_visit_date" = "visit_date")
+
+facility_hei <- monthhei %>%
+  mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+fac_hei <- table(facility_hei$mflcode)
+view(fac_hei)  
+
+##Outcomes from CWC and lab are included as previously requests were not being done in lab module to prevent missing out on clients. 
+
+###cwc outcomes
+eid_fol <- heifol %>%
+  select(patient_id,visit_date,dna_pcr_sample_date,dna_pcr_contextual_status,dna_pcr_result,mflcode)%>%
+  filter(dna_pcr_contextual_status == "Initial")%>%
+  filter(visit_date >= as.Date("2024-05-01")) %>%
+  arrange(visit_date)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE) ### get the latest lab result for clients done PCR. 
+
+###labaratory outcomes
+laab <- lab %>%
+  select(patient_id,mflcode,date_ordered,lab_test,test_result,order_reason,date_test_requested)%>%### get the latest lab result for clients done PCR. 
+  filter(lab_test == "HIV DNA POLYMERASE CHAIN REACTION, QUALITATIVE")%>%
+  filter(date_ordered >= as.Date("2024-05-01"))%>%
+  arrange(date_ordered)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+   rename("visit_date" = "date_ordered",
+          "dna_pcr_sample_date" = "date_test_requested",
+          "dna_pcr_contextual_status" = "lab_test",
+          "dna_pcr_result" = "test_result")%>%
+  mutate(dna_pcr_result= recode (dna_pcr_result, "664" = "NEGATIVE",
+                                 "703" = "POSITIVE",
+                                 "1138" = "INDETERMINATE",.default = NA_character_))
+
+
+###combine both cwc data and lab data
+hei_eid <- rbind(laab,eid_fol)%>% 
+arrange(dna_pcr_contextual_status)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+lab_hei <- inner_join(laab,eid_fol, by = c("patient_id","mflcode"))
+
+###combine PCR results with the active hei
+hei_outcome <- inner_join(monthhei,hei_eid, by = c("patient_id","mflcode"))
+
+
+hei_outcome$age_pcr_taken <- trunc((hei_outcome$DOB %--% hei_outcome$visit_date) / days(1)) ##create the age of clients in days
+
+write_xlsx(hei_outcome, path = " rehei initial.xlsx")
+###Total EID Tests
+all_test <- hei_outcome %>%
+    mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+all_hei <- table(all_test$mflcode)
+view(all_hei)  
+
+### EID less than 2 months
+less_2months <- hei_outcome %>%
+  filter(age_pcr_taken <= 62) %>%
+  mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+
+less_hei <- table(less_2months$mflcode)
+view(less_hei)  
+
+
+pos_pcr <- hei_outcome %>%
+  filter(dna_pcr_result == "POSITIVE")%>%
+  mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+###write_xlsx(pos_pcr, path = "positive pcr.xlsx")
+
+pos_hei <- table(pos_pcr$mflcode)
+view(pos_hei)  
+
+###Total EID Over 2 weeks
+over_2months <- hei_outcome %>%
+  filter(age_pcr_taken >= 56)%>%
+  filter(dna_pcr_result == "POSITIVE")%>%
+  mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+over_hei <- table(over_2months$mflcode)
+view(over_hei)  
+
+
+```
+
+
+hei positive
+
+
+```{r}
+pos_pcr <- hei_outcome %>%
+  filter(dna_pcr_result == "POSITIVE")
+
+###introduce mother variables
+
+rela <- relationship%>%
+  select(patient_id,mflcode,person_a,person_b,a_is_to_b,unique_patient_no)%>%
+  rename('individual_id' = 'patient_id',
+         'patient_id' = 'person_b')
+
+paired <- inner_join(pos_pcr,rela, by = c("patient_id","mflcode"))
+
+mum <- paired%>%
+  rename('hei_id' = 'patient_id',
+         'patient_id' = 'individual_id')
+
+
+###enrolment in hiv
+
+enrol <- hiv %>%
+  select(patient_id,mflcode,patient_type,date_first_enrolled_in_care,transfer_in_date,date_confirmed_hiv_positive)%>%
+  arrange(desc(date_first_enrolled_in_care))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+actpat <- inner_join(mum,enrol, by = c("patient_id","mflcode"))
+ 
+ 
+###art start date
+art_start <- drugevent%>%
+  select(patient_id,mflcode,program,art_startdate)%>% ###get the regimen of all clients. allow to remove clients 
+ filter(program == "HIV")%>%
+  arrange(desc(art_startdate))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+actpat <- inner_join(actpat,art_start, by = c("patient_id","mflcode"))
+
+```
+
+EID tESTS WITHIN THE QUATER
+```{r}
+monthhei <- hei %>%
+  select(hei_no,visit_date,patient_id,mflcode,DOB,openmrs_id,exit_date)%>%
+  filter(between(DOB, as.Date("2024-01-01"), as.Date("2024-03-31")))%>%
+  arrange(desc(visit_date))%>%    ### arrange the data in descending order
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+  rename("last_visit_date" = "visit_date")
+
+
+
+eid_fol <- heifol %>%
+  select(patient_id,visit_date,dna_pcr_sample_date,dna_pcr_contextual_status,dna_pcr_result,mflcode)%>%
+  filter(between(visit_date, as.Date("2024-01-01"), as.Date("2024-03-31"))) %>%
+  arrange(visit_date)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE) ### get the latest lab result for clients done PCR. 
+
+###labaratory outcomes
+laab <- lab %>%
+  select(patient_id,mflcode,date_ordered,lab_test,test_result,date_test_requested)%>%### get the latest lab result for clients done PCR. 
+  filter(lab_test == "HIV DNA POLYMERASE CHAIN REACTION, QUALITATIVE")%>%
+  filter(between(date_ordered, as.Date("2024-01-01"), as.Date("2024-03-31")))%>%
+  arrange(date_ordered)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+   rename("visit_date" = "date_ordered",
+          "dna_pcr_sample_date" = "date_test_requested",
+          "dna_pcr_contextual_status" = "lab_test",
+          "dna_pcr_result" = "test_result")%>%
+  mutate(dna_pcr_result= recode (dna_pcr_result, "664" = "NEGATIVE",
+                                 "703" = "POSITIVE",
+                                 "1138" = "INDETERMINATE",.default = NA_character_))
+
+
+###combine both cwc data and lab data
+hei_eid <- rbind(laab,eid_fol)%>% 
+arrange(dna_pcr_contextual_status)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+###combine PCR results with the active hei
+hei_outcome <- inner_join(monthhei,hei_eid, by = c("patient_id","mflcode"))
+
+
+hei_outcome$age_pcr_taken <- trunc((hei_outcome$DOB %--% hei_outcome$visit_date) / days(1)) ##create the age of clients in days
+
+less_2months <- hei_outcome %>%
+  filter(age_pcr_taken <= 62)
+
+over_2months <- hei_outcome %>%
+  filter(age_pcr_taken >= 63)
+
+pos_below_2_months <- hei_outcome %>%
+  filter(age_pcr_taken <= 62)%>%
+  filter(dna_pcr_result == "POSITIVE")%>%
+  mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+over_hei <- table(pos_below_2_months$mflcode)
+view(over_hei)  
+
+
+```
+
+
+
+Pending EID Test
+```{r}
+x_date <- as.Date("2024-03-31")
+
+
+exp_outcome <- left_join(monthhei,hei_eid, by = c("patient_id","mflcode"))
+
+wait_int <- exp_outcome %>%
+  filter(is.na(exp_outcome$dna_pcr_sample_date)) ####get HEI without PCR
+
+wait_int$age_pcr_taken <- trunc((wait_int$DOB %--% x_date) / days(1)) ##create the age of clients in days
+
+###with not intial PCR test
+wait_2months <- wait_int %>%
+filter(age_pcr_taken <= 62)%>%
+   mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+
+pp_hei <- table(wait_2months$mflcode)
+view(pp_hei)  
+
+
+####with no subsequent results
+wait_6months <- wait_int %>%
+filter(age_pcr_taken >= 56)%>%
+   mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+
+tp_hei <- table(wait_6months$mflcode)
+view(tp_hei)
+
+```
+
+Waiting for repeat test 6 months
+```{r}
+hei_curr <- monthhei
+
+###cwc outcomes at 6 month
+eid_fol <- heifol %>%
+  select(patient_id,visit_date,dna_pcr_sample_date,dna_pcr_contextual_status,dna_pcr_result,mflcode)%>%
+  filter(dna_pcr_contextual_status == "Repeat")%>%
+  filter(visit_date >= as.Date("2022-04-01")) %>%
+  arrange(visit_date)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE) ### get the latest lab result for clients done PCR. 
+
+
+
+hei_curr$age <- trunc((hei_curr$DOB %--% x_date) / days(1)) ##create the age of clients in days
+
+six_month <- hei_curr %>%
+  filter(age >= 180)
+
+
+##outcome for HEI greater than six months
+six_outcome <- left_join(six_month,eid_fol, by = c("patient_id","mflcode"))
+
+
+wait_six <- six_outcome %>%
+  filter(is.na(six_outcome$dna_pcr_sample_date))%>%
+   mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+
+six_hei <- table(wait_six$mflcode)
+view(six_hei) 
+
+
+```
+
+Waiting for repeat test 12 months
+
+```{r}
+
+hei_curr <- monthhei
+
+###cwc outcomes at 12 month
+eid_fol <- heifol %>%
+  select(patient_id,visit_date,dna_pcr_sample_date,dna_pcr_contextual_status,dna_pcr_result,mflcode)%>%
+  filter(dna_pcr_contextual_status == "Final test (end of pediatric window)")%>%
+  filter(visit_date >= as.Date("2022-10-01")) %>%
+  arrange(visit_date)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE) ### get the latest lab result for clients done PCR. 
+
+
+
+hei_curr$age <- trunc((hei_curr$DOB %--% x_date) / days(1)) ##create the age of clients in days
+
+one_year <- hei_curr %>%
+  filter(age >= 360)
+
+
+##outcome for HEI greater than six months
+one_outcome <- left_join(one_year,eid_fol, by = c("patient_id","mflcode"))
+
+
+wait_one <- one_outcome %>%
+  filter(is.na(one_outcome$dna_pcr_sample_date))%>%
+   mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+
+one_hei <- table(wait_one$mflcode)
+view(one_hei) 
+
+```
+Penta 1
+
+
+```{r}
+penta_curr <- hei %>%
+  select(hei_no,visit_date,patient_id,mflcode,DOB,openmrs_id,exit_date)%>%
+  filter(between(DOB, as.Date("2023-10-01"), as.Date("2024-03-31")))%>%
+  arrange(desc(visit_date))%>%    ### arrange the data in descending order
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+  rename("last_visit_date" = "visit_date")
+
+
+
+##Outcomes from CWC and lab are included as previously requests were not being done in lab module to prevent missing out on clients. 
+
+###cwc outcomes
+eid_fol <- heifol %>%
+  select(patient_id,visit_date,dna_pcr_sample_date,dna_pcr_contextual_status,dna_pcr_result,mflcode)%>%
+  filter(visit_date >= as.Date("2022-10-01")) %>%
+  arrange(visit_date)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE) ### get the latest lab result for clients done PCR. 
+
+###labaratory outcomes
+laab <- lab %>%
+  select(patient_id,mflcode,date_ordered,lab_test,test_result,date_test_requested)%>%### get the latest lab result for clients done PCR. 
+  filter(lab_test == "HIV DNA POLYMERASE CHAIN REACTION, QUALITATIVE")%>%
+  filter(date_ordered >= as.Date("2022-10-01"))%>%
+  arrange(date_ordered)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+   rename("visit_date" = "date_ordered",
+          "dna_pcr_sample_date" = "date_test_requested",
+          "dna_pcr_contextual_status" = "lab_test",
+          "dna_pcr_result" = "test_result")%>%
+  mutate(dna_pcr_result= recode (dna_pcr_result, "664" = "NEGATIVE",
+                                 "703" = "POSITIVE",
+                                 "1138" = "INDETERMINATE",.default = NA_character_))
+
+
+###combine both cwc data and lab data
+hei_eid <- rbind(laab,eid_fol)%>% 
+arrange(dna_pcr_contextual_status)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+###combine PCR results with the active hei
+hei_penta <- inner_join(penta_curr,hei_eid, by = c("patient_id","mflcode"))
+
+
+penta_one <- hei_penta %>%
+     mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+
+penta_hei <- table(penta_one$mflcode)
+view(penta_hei) 
+
+
+####hei positive
+penta_one_pos <- hei_penta %>%
+  filter(dna_pcr_result == "POSITIVE") %>%
+     mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+
+penta_hei_pos <- table(penta_one_pos$mflcode)
+view(penta_hei_pos) 
+
+
+
+```
+PCR Positive within quater
+
+```{r}
+monthhei <- hei %>%
+  select(hei_no,visit_date,patient_id,mflcode,DOB,openmrs_id,exit_date)%>%
+  filter(between(DOB, as.Date("2024-01-01"), as.Date("2024-03-31")))%>%
+  arrange(desc(visit_date))%>%    ### arrange the data in descending order
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+  rename("last_visit_date" = "visit_date")
+
+
+
+##Outcomes from CWC and lab are included as previously requests were not being done in lab module to prevent missing out on clients. 
+
+###cwc outcomes
+qut_fol <- heifol %>%
+  select(patient_id,visit_date,dna_pcr_sample_date,dna_pcr_contextual_status,dna_pcr_result,mflcode)%>%
+  filter(dna_pcr_contextual_status == "Initial"|dna_pcr_contextual_status == "Repeat")%>%
+  filter(between(visit_date, as.Date("2023-10-01"), as.Date("2024-03-31"))) %>%
+  arrange(visit_date)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE) ### get the latest lab result for clients done PCR. 
+
+###labaratory outcomes
+laab <- lab %>%
+  select(patient_id,mflcode,date_ordered,lab_test,test_result,date_test_requested)%>%### get the latest lab result for clients done PCR. 
+  filter(lab_test == "HIV DNA POLYMERASE CHAIN REACTION, QUALITATIVE")%>%
+  filter(between(date_ordered, as.Date("2024-01-01"), as.Date("2024-03-31")))%>%
+  arrange(date_ordered)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+   rename("visit_date" = "date_ordered",
+          "dna_pcr_sample_date" = "date_test_requested",
+          "dna_pcr_contextual_status" = "lab_test",
+          "dna_pcr_result" = "test_result")%>%
+  mutate(dna_pcr_result= recode (dna_pcr_result, "664" = "NEGATIVE",
+                                 "703" = "POSITIVE",
+                                 "1138" = "INDETERMINATE",.default = NA_character_))
+
+
+###combine both cwc data and lab data
+qut_eid <- rbind(laab,qut_fol)%>% 
+arrange(dna_pcr_contextual_status)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+pt_outcome <- inner_join(monthhei,qut_eid, by = c("patient_id","mflcode"))
+
+
+
+pcr_qut <- pt_outcome %>%
+  filter(dna_pcr_result == "POSITIVE") %>%
+     mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+pos_hei <- pt_outcome %>%
+  filter(dna_pcr_result == "POSITIVE")
+
+
+```
+PCR done within quater
+```{r}
+
+monthhei <- hei %>%
+  select(hei_no,visit_date,patient_id,mflcode,DOB,openmrs_id,exit_date)%>%
+  filter(between(DOB, as.Date("2022-10-01"), as.Date("2024-03-31")))%>%
+  arrange(desc(visit_date))%>%    ### arrange the data in descending order
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+  rename("last_visit_date" = "visit_date")
+
+
+
+###cwc outcomes
+eid_fol <- heifol %>%
+  select(patient_id,visit_date,dna_pcr_sample_date,dna_pcr_contextual_status,dna_pcr_result,mflcode)%>%
+  filter(between(visit_date, as.Date("2023-10-01"), as.Date("2024-03-31"))) %>%
+  arrange(visit_date)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE) ### get the latest lab result for clients done PCR. 
+
+###labaratory outcomes
+laab <- lab %>%
+  select(patient_id,mflcode,date_ordered,lab_test,test_result,date_test_requested)%>%### get the latest lab result for clients done PCR. 
+  filter(lab_test == "HIV DNA POLYMERASE CHAIN REACTION, QUALITATIVE")%>%
+  filter(between(date_ordered, as.Date("2024-01-01"), as.Date("2024-03-31"))) %>%
+  arrange(date_ordered)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+   rename("visit_date" = "date_ordered",
+          "dna_pcr_sample_date" = "date_test_requested",
+          "dna_pcr_contextual_status" = "lab_test",
+          "dna_pcr_result" = "test_result")%>%
+  mutate(dna_pcr_result= recode (dna_pcr_result, "664" = "NEGATIVE",
+                                 "703" = "POSITIVE",
+                                 "1138" = "INDETERMINATE",.default = NA_character_))
+
+
+###combine both cwc data and lab data
+hei_eid <- rbind(laab,eid_fol)%>% 
+arrange(dna_pcr_contextual_status)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+
+```
+
