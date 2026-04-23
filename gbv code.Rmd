@@ -1,0 +1,764 @@
+---
+title: "GBV Cascade"
+author: "Mitch"
+date: "2024-06-05"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+Libraries
+
+```{r}
+pacman::p_load(tidyverse, lubridate, haven, writexl,readxl,zoo,gt)
+```
+
+dataset
+
+```{r}
+GBV <- read_sav("\\\\ng-svr-fs/Hope-Data/Coptic_Hospitals_dataset/GBV.sav") ### intimate partner violence
+
+GBV_Action_Taken <- read_sav("\\\\ng-svr-fs/Hope-Data/Coptic_Hospitals_dataset/GBV_Action_Taken.sav")  ### GBV_Action_Taken
+
+GBV_Customized <- read_sav("\\\\ng-svr-fs/Hope-Data/Coptic_Hospitals_dataset/GBV_Customized.sav")  ### provides the type of GBV that was experienced by the individuals
+
+SGBV_Customized <- read_sav("\\\\ng-svr-fs/Hope-Data/Coptic_Hospitals_dataset/SGBV_Customized.sav")  ### sexual based violence experience
+
+hts_screening <- read_sav("\\\\ng-svr-fs/Hope-Data/Coptic_Hospitals_dataset/HTS_Eligibility_scren.sav") ### enrolled GBV
+ 
+```
+
+screening GBV
+
+```{r}
+###customized GBV form
+cus_gbv <- GBV_Customized %>%
+  separate(VisitDate,c("visit_date","visit_time"),sep=" ") %>% ###Separate the visit date from time
+  select(patient_id,mflcode,visit_date,dob,gender) ###select data from GBV
+
+cus_gbv$visit_date <- ymd(cus_gbv$visit_date) ##convert to date format
+
+cus_gbv <- cus_gbv %>%
+  filter(between(visit_date, as.Date("2024-05-01"), as.Date("2024-05-31")))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+#### intimate partner violence
+ipv_gbv <- GBV %>% ##intimate partner violence
+  select(patient_id,mflcode,visit_date,dob,gender)%>%
+  filter(between(visit_date, as.Date("2024-05-01"), as.Date("2024-05-31")))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+#### screening in HTS
+hts_gbv <- hts_screening %>% ### GBV screening hts screening and testing
+  select(patient_id,mflcode,visit_date,dob,Gender)
+
+hts_gbv$visit_date <- ymd(hts_gbv$visit_date) ##convert to date format
+
+
+hts_gbv <- hts_gbv %>%
+  filter(between(visit_date, as.Date("2024-05-01"), as.Date("2024-05-31")))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)%>%
+  rename("gender" = "Gender")
+
+### screening SGBV
+
+sgbv <- SGBV_Customized %>%
+  separate(VisitDate,c("visit_date","visit_time"),sep=" ")%>%
+  select(patient_id,mflcode,visit_date,dob,gender)
+  
+sgbv$visit_date <- ymd(sgbv$visit_date) ##convert to date format
+
+sgbv <- sgbv %>%
+  filter(between(visit_date, as.Date("2024-05-01"), as.Date("2024-05-31")))
+#### total screened ...
+
+#### combine customized gbv screening with intimate partner screening and remove duplicates
+screen <- rbind(cus_gbv,ipv_gbv)%>% 
+arrange(visit_date)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+#### combine customized gbv screening with intimate partner screening and remove duplicates
+screen <- rbind(screen,hts_gbv)%>% 
+arrange(visit_date)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+#### combine customized gbv screening with intimate partner screening and remove duplicates
+screen <- rbind(screen,sgbv)%>% 
+arrange(visit_date)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+screen <- screen %>%
+  filter(mflcode == 12905)%>%
+  mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+x_date <- as.Date("2024-05-31") ### using lubricate to assign a client date
+
+screen$age <- trunc((screen$dob %--% x_date) / years(1)) ### using lubricate to assign a client date
+
+
+screen <- screen %>%
+  mutate(age_group= case_when(age <=9 ~ "0-9",
+                              age <=17 ~ "10-17",
+                              age <=49 ~ "18-49",
+                              age >=50 ~ "50"))
+
+
+
+
+gbv_screen <- screen |> 
+  group_by(age_group, gender, mflcode) |> 
+  summarise(n = n(), .groups = 'drop')
+
+gbv_screen_wider <- gbv_screen |> 
+  pivot_wider(
+    names_from = c(age_group, gender),
+    values_from = n
+  ) |> 
+  # Make missing numbers (NAs) into zero
+  mutate(across(.cols = -(1:2), .fns = ~replace_na(., replace = 0))) |> 
+  arrange(mflcode) 
+
+gbv_screen_wider
+
+gbv_screen_wider |> 
+  gt() |>
+  cols_label("0-9_F" = '0-9 (F)',
+             "0-9_M" = '0-9 (M)',
+             "10-17_M" = "10-17 (M)",
+             "10-17_F" = "10-17 (F)",
+             "18-49_M" = "18-49 (M)",
+             "18-49_F" = "18-49 (F)",
+             "50_M" = "50 (M)",
+             "50_F" = "50 (F)")|>
+   tab_spanner(
+    label = md('**0-9 yrs**'),
+    columns = contains('0-9')
+         ) |> 
+  tab_spanner(
+    label = md('**10-17 yrs**'),
+    columns = contains('10-17')
+      ) |> 
+  tab_spanner(
+    label =  md('**18-49 yrs**'),
+    columns = contains('18-49')
+  ) |> 
+    tab_spanner(
+    label =  md('**50+ yrs**'),
+    columns = contains('50')
+  )
+         
+         
+ actual_colnames <- colnames(gbv_screen_wider)        
+  
+ actual_colnames
+ 
+ desired_colnames <- actual_colnames |> 
+  str_remove('(0-9|10-17|18-49|50|)_') |> 
+  str_to_title()
+        
+ names(desired_colnames) <- actual_colnames 
+ 
+ desired_colnames
+ 
+gbv_screen_wider <- gbv_screen_wider %>%
+    select(mflcode,"0-9_M","0-9_F","10-17_M","10-17_F","18-49_M","18-49_F","50_M","50_F")
+
+
+gbv_screen_wider |> 
+  gt() |> 
+  cols_label(.list = desired_colnames) |> 
+  tab_spanner(
+    label = md('**0-9 yrs**'),
+    columns = contains('0-9')
+  )|> 
+   tab_spanner(
+    label = md('**10-17 yrs**'),
+    columns = contains('10-17')
+      ) |> 
+  tab_spanner(
+    label =  md('**18-49 yrs**'),
+    columns = contains('18-49')
+  ) |> 
+    tab_spanner(
+    label =  md('**50+ yrs**'),
+    columns = contains('50')
+  )|> 
+  tab_header(
+    title = 'Number of Clients screened for GBV'
+  ) 
+    
+    
+  
+###write_xlsx(screen, path = "screen GBV.xlsx")
+    
+ 
+    
+    
+    
+     
+```
+
+SGBV
+
+```{r}
+### sgbv
+s_gbv <- sgbv %>%
+  filter(mflcode == 12905)%>%
+  mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+
+x_date <- as.Date("2024-05-31") ### using lubricate to assign a client date
+
+s_gbv$age <- trunc((s_gbv$dob %--% x_date) / years(1)) ### using lubricate to assign a client date
+
+s_gbv <- s_gbv %>%
+  mutate(age_group= case_when(age <=9 ~ "0-9",
+                              age <=17 ~ "10-17",
+                              age <=49 ~ "18-49",
+                              age >=50 ~ "50"))
+
+
+
+
+gbv_sexual <- s_gbv |> 
+  group_by(age_group, gender, mflcode) |> 
+  summarise(n = n(), .groups = 'drop')
+
+gbv_sexual_wider <- gbv_sexual |> 
+  pivot_wider(
+    names_from = c(age_group, gender),
+    values_from = n
+  ) |> 
+  # Make missing numbers (NAs) into zero
+  mutate(across(.cols = -(1:2), .fns = ~replace_na(., replace = 0))) |> 
+  arrange(mflcode) 
+
+gbv_sexual_wider
+
+gbv_sexual_wider |> 
+  gt() |>
+  cols_label("0-9_F" = '0-9 (F)',
+             "0-9_M" = '0-9 (M)',
+             "10-17_M" = "10-17 (M)",
+             "10-17_F" = "10-17 (F)",
+             "18-49_M" = "18-49 (M)",
+             "18-49_F" = "18-49 (F)",
+             "50_M" = "50 (M)",
+             "50_F" = "50 (F)")|>
+   tab_spanner(
+    label = md('**0-9 yrs**'),
+    columns = contains('0-9')
+         ) |> 
+  tab_spanner(
+    label = md('**10-17 yrs**'),
+    columns = contains('10-17')
+      ) |> 
+  tab_spanner(
+    label =  md('**18-49 yrs**'),
+    columns = contains('18-49')
+  ) |> 
+    tab_spanner(
+    label =  md('**50+ yrs**'),
+    columns = contains('50')
+  )
+         
+         
+ actual_colnames <- colnames(gbv_screen_wider)        
+  
+ actual_colnames
+ 
+ desired_colnames <- actual_colnames |> 
+  str_remove('(0-9|10-17|18-49|50|)_') |> 
+  str_to_title()
+        
+ names(desired_colnames) <- actual_colnames 
+ 
+ desired_colnames
+ 
+gbv_sexual_wider <- gbv_sexual_wider %>%
+    select(mflcode,"0-9_M","0-9_F","10-17_M","10-17_F","18-49_M","18-49_F","50_M","50_F")
+
+
+gbv_sexual_wider |> 
+  gt() |> 
+  cols_label(.list = desired_colnames) |> 
+  tab_spanner(
+    label = md('**0-9 yrs**'),
+    columns = contains('0-9')
+  )|> 
+   tab_spanner(
+    label = md('**10-17 yrs**'),
+    columns = contains('10-17')
+      ) |> 
+  tab_spanner(
+    label =  md('**18-49 yrs**'),
+    columns = contains('18-49')
+  ) |> 
+    tab_spanner(
+    label =  md('**50+ yrs**'),
+    columns = contains('50')
+  )|> 
+  tab_header(
+    title = 'Number of Clients experienced  SGBV'
+  ) 
+
+
+##write_xlsx(s_gbv, path = "sGBV.xlsx")
+
+```
+
+Action taken on SGBV
+
+```{r}
+asgbv <- SGBV_Customized %>%
+  separate(VisitDate,c("visit_date","visit_time"),sep=" ")%>%
+  select(patient_id,mflcode,visit_date,dob,gender,HIV_test_Results,Clinical_services3,Clinical_services4,Clinical_services7)
+  
+asgbv$visit_date <- ymd(asgbv$visit_date) ##convert to date format
+
+asgbv <- asgbv %>%
+  filter(between(visit_date, as.Date("2024-05-01"), as.Date("2024-05-31")))
+#### creating final data set
+
+hts <- asgbv %>%
+  select(patient_id,mflcode,visit_date,dob,gender,HIV_test_Results)%>%
+  filter(HIV_test_Results != "known positive")  ### separate those who received testing services
+
+pep <- asgbv %>%
+  select(patient_id,mflcode,visit_date,dob,gender,Clinical_services3)%>%
+  filter(Clinical_services3  == "Given PEP within 72 hrs") %>%
+  rename("HIV_test_Results" ="Clinical_services3") ### separate those who received pep services
+
+ecp <- asgbv %>%
+  select(patient_id,mflcode,visit_date,dob,gender,Clinical_services4)%>%
+  filter(Clinical_services4  == "Given ECP within 120 hrs") %>%
+  rename("HIV_test_Results" ="Clinical_services4")### separate those who received ecp services
+
+sti <- asgbv %>%
+  select(patient_id,mflcode,visit_date,dob,gender,Clinical_services7) %>%
+  filter(Clinical_services7  == "STI prophylaxis") %>%
+  rename("HIV_test_Results" ="Clinical_services7")### separate those who received testing sti prophylaxis
+
+act_sgbv <- rbind(hts,pep) ### combine the data for those who received pep services and hts testing
+
+act_sgbv <- rbind(act_sgbv,ecp) ### add those given ecp 
+
+act_sgbv <- rbind(act_sgbv,sti)  ### add those given pep prophylaxis
+
+### sgbv
+act_sgbv <- act_sgbv %>%
+  filter(mflcode == 12905)%>%
+  mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+
+x_date <- as.Date("2024-05-31") ### using lubricate to assign a client date
+
+act_sgbv$age <- trunc((act_sgbv$dob %--% x_date) / years(1)) ### using lubricate to assign a client date
+
+act_sgbv <- act_sgbv %>%
+  mutate(age_group= case_when(age <=9 ~ "0-9",
+                              age <=17 ~ "10-17",
+                              age <=49 ~ "18-49",
+                              age >=50 ~ "50"))
+
+
+
+
+act_sgbv <- act_sgbv |> 
+  group_by(age_group, gender, HIV_test_Results) |> 
+  summarise(n = n(), .groups = 'drop')
+
+act_sgbv_wider <- act_sgbv |> 
+  pivot_wider(
+    names_from = c(age_group, gender,age_group),
+    values_from = n
+  ) |> 
+  # Make missing numbers (NAs) into zero
+  mutate(across(.cols = -(1:2), .fns = ~replace_na(., replace = 0))) |> 
+  arrange(HIV_test_Results) 
+
+act_sgbv_wider
+
+act_sgbv_wider |> 
+  gt() |>
+  cols_label("0-9_F" = '0-9 (F)',
+             "0-9_M" = '0-9 (M)',
+             "10-17_M" = "10-17 (M)",
+             "10-17_F" = "10-17 (F)",
+             "18-49_M" = "18-49 (M)",
+             "18-49_F" = "18-49 (F)",
+             "50_M" = "50 (M)",
+             "50_F" = "50 (F)")|>
+   tab_spanner(
+    label = md('**0-9 yrs**'),
+    columns = contains('0-9')
+         ) |> 
+  tab_spanner(
+    label = md('**10-17 yrs**'),
+    columns = contains('10-17')
+      ) |> 
+  tab_spanner(
+    label =  md('**18-49 yrs**'),
+    columns = contains('18-49')
+  ) |> 
+    tab_spanner(
+    label =  md('**50+ yrs**'),
+    columns = contains('50')
+  )
+         
+         
+ actual_colnames <- colnames(act_sgbv_wider)        
+  
+ actual_colnames
+ 
+ desired_colnames <- actual_colnames |> 
+  str_remove('(0-9|10-17|18-49|50|)_') |> 
+  str_to_title()
+        
+ names(desired_colnames) <- actual_colnames 
+ 
+ desired_colnames
+ 
+act_sgbv_wider <- act_sgbv_wider %>%
+    select(HIV_test_Results,"0-9_M","0-9_F","10-17_M","10-17_F","18-49_M","18-49_F","50_M","50_F")
+
+
+act_sgbv_wider |> 
+  gt() |> 
+  cols_label(.list = desired_colnames) |> 
+  tab_spanner(
+    label = md('**0-9 yrs**'),
+    columns = contains('0-9')
+  )|> 
+   tab_spanner(
+    label = md('**10-17 yrs**'),
+    columns = contains('10-17')
+      ) |> 
+  tab_spanner(
+    label =  md('**18-49 yrs**'),
+    columns = contains('18-49')
+  ) |> 
+    tab_spanner(
+    label =  md('**50+ yrs**'),
+    columns = contains('50')
+  )|> 
+  tab_header(
+    title = 'Action taken on  SGBV'
+  ) 
+```
+
+GBV by Gender
+
+```{r}
+type_gbv <- GBV_Customized %>%
+  separate(VisitDate,c("visit_date","visit_time"),sep=" ") %>% ###Separate the visit date from time
+  select(patient_id,mflcode,visit_date,dob,gender,Type_of_violence) ###select data from GBV
+
+type_gbv$visit_date <- ymd(type_gbv$visit_date) ##convert to date format
+
+type_gbv <- type_gbv %>%
+  filter(between(visit_date, as.Date("2024-05-01"), as.Date("2024-05-31")))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+type_gbv <- type_gbv %>%  
+  filter(mflcode == 12905)%>%
+  mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+type_gbv$age <- trunc((type_gbv$dob %--% x_date) / years(1)) ### using lubricate to assign a client date
+
+
+tgbv <- type_gbv%>%
+  mutate(age_group= case_when(age <=9 ~ "0-9",
+                              age <=17 ~ "10-17",
+                              age <=49 ~ "18-49",
+                              age >=50 ~ "50"))
+
+
+
+
+tgbv_screen <- tgbv |> 
+  group_by(age_group, gender,mflcode,Type_of_violence) |> 
+  summarise(n = n(), .groups = 'drop')
+
+tgbv_screen_wider <- tgbv_screen |> 
+  pivot_wider(
+    names_from = c(age_group, gender),
+    values_from = n
+  ) |> 
+  # Make missing numbers (NAs) into zero
+  mutate(across(.cols = -(1:2), .fns = ~replace_na(., replace = 0))) |> 
+  arrange(Type_of_violence) 
+
+tgbv_screen_wider
+
+tgbv_screen_wider |> 
+  gt() |>
+  cols_label("0-9_F" = '0-9 (F)',
+             "0-9_M" = '0-9 (M)',
+             "10-17_M" = "10-17 (M)",
+             "10-17_F" = "10-17 (F)",
+             "18-49_M" = "18-49 (M)",
+             "18-49_F" = "18-49 (F)",
+             "50_M" = "50 (M)",
+             "50_F" = "50 (F)")|>
+   tab_spanner(
+    label = md('**0-9 yrs**'),
+    columns = contains('0-9')
+         ) |> 
+  tab_spanner(
+    label = md('**10-17 yrs**'),
+    columns = contains('10-17')
+      ) |> 
+  tab_spanner(
+    label =  md('**18-49 yrs**'),
+    columns = contains('18-49')
+  ) |> 
+    tab_spanner(
+    label =  md('**50+ yrs**'),
+    columns = contains('50')
+  )
+         
+         
+ actual_colnames <- colnames(tgbv_screen_wider)        
+  
+ actual_colnames
+ 
+ desired_colnames <- actual_colnames |> 
+  str_remove('(0-9|10-17|18-49|50|)_') |> 
+  str_to_title()
+        
+ names(desired_colnames) <- actual_colnames 
+ 
+ desired_colnames
+ 
+tgbv_screen_wider <- tgbv_screen_wider %>%
+    select(mflcode,Type_of_violence,"0-9_M","0-9_F","10-17_M","10-17_F","18-49_M","18-49_F","50_M","50_F")
+
+
+tgbv_screen_wider |> 
+  gt() |> 
+  cols_label(.list = desired_colnames) |> 
+  tab_spanner(
+    label = md('**0-9 yrs**'),
+    columns = contains('0-9')
+  )|> 
+   tab_spanner(
+    label = md('**10-17 yrs**'),
+    columns = contains('10-17')
+      ) |> 
+  tab_spanner(
+    label =  md('**18-49 yrs**'),
+    columns = contains('18-49')
+  ) |> 
+    tab_spanner(
+    label =  md('**50+ yrs**'),
+    columns = contains('50')
+  )|> 
+  tab_header(
+    title = 'GBV by Gender'
+  ) 
+    
+
+####write_xlsx(tgbv, path = "type of GBV.xlsx")
+```
+
+age of perpetrators
+
+```{r}
+###GBV
+p_gbv <- GBV_Customized %>%
+  separate(VisitDate,c("visit_date","visit_time"),sep=" ") %>% ###Separate the visit date from time
+  select(patient_id,mflcode,visit_date,the_perpetrators,gender_perpetrators,age_perpetrators) ###select data from GBV
+
+p_gbv$visit_date <- ymd(p_gbv$visit_date) ##convert to date format
+
+p_gbv <- p_gbv %>%
+  filter(between(visit_date, as.Date("2024-05-01"), as.Date("2024-05-31")))%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+
+#### sgbv
+pep_sgbv <- SGBV_Customized %>%
+  separate(VisitDate,c("visit_date","visit_time"),sep=" ")%>%
+  select(patient_id,mflcode,visit_date,perpetrators,gender_perpetrators,age_perpetrators)%>%
+  rename("the_perpetrators" = "perpetrators")
+  
+pep_sgbv$visit_date <- ymd(pep_sgbv$visit_date) ##convert to date format
+
+pep_sgbv <- pep_sgbv %>%
+  filter(between(visit_date, as.Date("2024-05-01"), as.Date("2024-05-31")))
+
+###combined
+pep_gbv <- rbind(p_gbv,pep_sgbv)%>% 
+arrange(visit_date)%>%
+  distinct(patient_id, mflcode, .keep_all = TRUE)
+
+pep_gbv <- pep_gbv %>%  
+  filter(mflcode == 12905)%>%
+  mutate(mflcode= recode (mflcode, "12881"= "Baraka Dispensary (Nairobi)",
+                          "24563" = "Nairobi Adventist Hospital",
+                          "13209"= "St Joseph W Dispensary (Westlands)", 
+                          "13074"= "The Mater Hospital Mukuru",
+                          "13057"= "Makadara Mercy Sisters Dispensary",
+                          "17723"= "St Barkita Dispensary Utawala",
+                          "12905"= "Coptic Hospital (Ngong Road)",
+                          "15862"= "Coptic Nursing Home",
+                          "18745"= "Comboni Sisters H Project VCT",
+                          "12904"= "Coptic Medical Clinic",
+                          "17683"= "St Raphaels Clinic",.default = NA_character_))
+
+
+
+
+pep_gbv <- pep_gbv %>%
+  mutate(gender_perpetrators = recode(gender_perpetrators, "Male" = "M",
+                                      "Female" = "F"),
+         age_perpetrators = recode(age_perpetrators,"Less than 18 yrs" = "0-17",
+                                   "18-24 yrs" = "18-24",
+                                   "25-34 yrs" = "25-34",
+                                   "35-49 yrs" = "35-49",
+                                   "50 yrs and above" = "50"),
+         the_perpetrators= recode(the_perpetrators, "known" = "Known")) %>%
+  rename("gender" = "gender_perpetrators",
+         "age_group" = "age_perpetrators")
+
+
+pep_screen <- pep_gbv |> 
+  group_by(age_group, gender,mflcode,the_perpetrators) |> 
+  summarise(n = n(), .groups = 'drop')
+
+pep_screen_wider <- pep_screen |> 
+  pivot_wider(
+    names_from = c(age_group, gender),
+    values_from = n
+  ) |> 
+  # Make missing numbers (NAs) into zero
+  mutate(across(.cols = -(1:2), .fns = ~replace_na(., replace = 0))) |> 
+  arrange(the_perpetrators) 
+
+pep_screen_wider
+
+pep_screen_wider |> 
+  gt() |>
+  cols_label("0-17_F" = '0-17 (F)',
+             "0-17_M" = '0-17 (M)',
+             "18-24_M" = "18-24 (M)",
+             "18-24_F" = "18-24 (F)",
+             "25-34_M" = "25-34 (M)",
+             "25-34_F" = "25-34 (F)",
+             "35-49_M" = "35-49 (M)",
+             "35-49_F" = "35-49 (F)",
+             "50_M" = "50 (M)",
+             "50_F" = "50 (F)")|>
+   tab_spanner(
+    label = md('**0-17 yrs**'),
+    columns = contains('0-17')
+         ) |> 
+  tab_spanner(
+    label = md('**18-24 yrs**'),
+    columns = contains('18-24')
+    )|> 
+  tab_spanner(
+    label = md('**25-34 yrs**'),
+    columns = contains('25-34')
+      ) |> 
+  tab_spanner(
+    label =  md('**35-49 yrs**'),
+    columns = contains('35-49')
+  ) |> 
+    tab_spanner(
+    label =  md('**50+ yrs**'),
+    columns = contains('50')
+  )
+         
+         
+ actual_colnames <- colnames(pep_screen_wider)        
+  
+ actual_colnames
+ 
+ desired_colnames <- actual_colnames |> 
+  str_remove('(0-17|18-24|25-34|35-49|50|)_') |> 
+  str_to_title()
+        
+ names(desired_colnames) <- actual_colnames 
+ 
+ desired_colnames
+ 
+pep_screen_widerr <- pep_screen_wider %>%
+    select(mflcode,the_perpetrators,"0-17_M","0-17_F","18-24_M","18-24_F","25-34_M","25-34_F","35-49_M","35-49_F","50_M","50_F")
+
+
+pep_screen_wider |> 
+  gt() |> 
+  cols_label(.list = desired_colnames) |> 
+  tab_spanner(
+    label = md('**0-17 yrs**'),
+    columns = contains('0-17')
+  )|> 
+   tab_spanner(
+    label = md('**18-24 yrs**'),
+    columns = contains('18-24')
+      ) |> 
+   tab_spanner(
+    label = md('**25-34 yrs**'),
+    columns = contains('25-34')
+      )|> 
+  tab_spanner(
+    label =  md('**35-49 yrs**'),
+    columns = contains('35-49')
+  ) |> 
+    tab_spanner(
+    label =  md('**50+ yrs**'),
+    columns = contains('50')
+  )|> 
+  tab_header(
+    title = 'Perpetrators by Age')
+```
